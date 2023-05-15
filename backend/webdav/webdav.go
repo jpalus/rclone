@@ -178,6 +178,7 @@ type Fs struct {
 	canStream          bool          // set if can stream
 	useOCMtime         bool          // set if can use X-OC-Mtime
 	propsetMtime       bool          // set if can use propset
+	propNameMtime      string        // name of property to set for mtime
 	retryWithZeroDepth bool          // some vendors (sharepoint) won't list files when Depth is 1 (our default)
 	checkBeforePurge   bool          // enables extra check that directory to purge really exists
 	hasOCMD5           bool          // set if can use owncloud style checksums for MD5
@@ -581,18 +582,22 @@ func (f *Fs) setQuirks(ctx context.Context, vendor string) error {
 		f.canStream = true
 		f.precision = time.Second
 		f.useOCMtime = true
+		f.propsetMtime = true
+		f.propNameMtime = "getlastmodified"
 		f.hasMESHA1 = true
 	case "owncloud":
 		f.canStream = true
 		f.precision = time.Second
 		f.useOCMtime = true
 		f.propsetMtime = true
+		f.propNameMtime = "lastmodified"
 		f.hasOCMD5 = true
 		f.hasOCSHA1 = true
 	case "nextcloud":
 		f.precision = time.Second
 		f.useOCMtime = true
 		f.propsetMtime = true
+		f.propNameMtime = "lastmodified"
 		f.hasOCSHA1 = true
 		f.canChunk = true
 
@@ -1322,11 +1327,11 @@ func (o *Object) ModTime(ctx context.Context) time.Time {
 // Set modified time using propset
 //
 // <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns"><d:response><d:href>/ocm/remote.php/webdav/office/wir.jpg</d:href><d:propstat><d:prop><d:lastmodified/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>
-var owncloudPropset = `<?xml version="1.0" encoding="utf-8" ?>
+var mtimePropset = `<?xml version="1.0" encoding="utf-8" ?>
 <D:propertyupdate xmlns:D="DAV:">
  <D:set>
   <D:prop>
-   <lastmodified xmlns="DAV:">%d</lastmodified>
+   <D:%s>%s</D:%s>
   </D:prop>
  </D:set>
 </D:propertyupdate>
@@ -1335,11 +1340,17 @@ var owncloudPropset = `<?xml version="1.0" encoding="utf-8" ?>
 // SetModTime sets the modification time of the local fs object
 func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
 	if o.fs.propsetMtime {
+		var modTimeStr string
+		if o.fs.propNameMtime == "getlastmodified" {
+			modTimeStr = modTime.Format(time.RFC1123)
+		} else {
+			modTimeStr = strconv.FormatInt(modTime.Unix(), 10)
+		}
 		opts := rest.Opts{
 			Method:     "PROPPATCH",
 			Path:       o.filePath(),
 			NoRedirect: true,
-			Body:       strings.NewReader(fmt.Sprintf(owncloudPropset, modTime.Unix())),
+			Body:       strings.NewReader(fmt.Sprintf(mtimePropset, o.fs.propNameMtime, modTimeStr, o.fs.propNameMtime)),
 		}
 		var result api.Multistatus
 		var resp *http.Response
