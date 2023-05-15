@@ -146,6 +146,14 @@ Set to 0 to disable chunked uploading.
 `,
 			Advanced: true,
 			Default:  10 * fs.Mebi, // Default NextCloud `max_chunk_size` is `10 MiB`. See https://github.com/nextcloud/server/blob/0447b53bda9fe95ea0cbed765aa332584605d652/apps/files/lib/App.php#L57
+		}, {
+			Name: "update_modtime",
+			Help: `Adjust modification time on servers which allow DAV:getlastmodified property update.
+
+Use provider's default if unset.
+`,
+			Default:  fs.Tristate{},
+			Advanced: true,
 		}},
 	})
 }
@@ -162,6 +170,7 @@ type Options struct {
 	Headers            fs.CommaSepList      `config:"headers"`
 	PacerMinSleep      fs.Duration          `config:"pacer_min_sleep"`
 	ChunkSize          fs.SizeSuffix        `config:"nextcloud_chunk_size"`
+	UpdateModTime      fs.Tristate          `config:"update_modtime"`
 }
 
 // Fs represents a remote webdav
@@ -582,8 +591,11 @@ func (f *Fs) setQuirks(ctx context.Context, vendor string) error {
 		f.canStream = true
 		f.precision = time.Second
 		f.useOCMtime = true
-		f.propsetMtime = true
-		f.propNameMtime = "getlastmodified"
+		if !f.opt.UpdateModTime.Valid || f.opt.UpdateModTime.Valid && f.opt.UpdateModTime.Value {
+			f.precision = time.Second
+			f.propsetMtime = true
+			f.propNameMtime = "getlastmodified"
+		}
 		f.hasMESHA1 = true
 	case "owncloud":
 		f.canStream = true
@@ -650,6 +662,11 @@ func (f *Fs) setQuirks(ctx context.Context, vendor string) error {
 		// condition and return a proper error code.
 		f.checkBeforePurge = true
 	case "other":
+		if f.opt.UpdateModTime.Valid && f.opt.UpdateModTime.Value {
+			f.precision = time.Second
+			f.propsetMtime = true
+			f.propNameMtime = "getlastmodified"
+		}
 	default:
 		fs.Debugf(f, "Unknown vendor %q", vendor)
 	}
